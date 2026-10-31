@@ -57,9 +57,12 @@ h1 { font-size: 22px; text-align: center; color: #1a1a1a; margin-bottom: 4px; }
 
 /* 水位状态徽章 */
 .badge {
-  display: block; padding: 10px; border-radius: 40px;
+  display: table; /* 或者用 inline-block */
+  margin: 0 auto 16px auto; /* 上下边距不变，左右改为 auto 实现居中 */
+  padding: 10px 40px; /* 增加左右内边距，让背景框看起来更美观，不那么局促 */
+  border-radius: 40px;
   color: #fff; font-size: 22px; font-weight: bold;
-  margin: 0 0 16px; text-align: center;
+  text-align: center;
 }
 .badge-sufficient { background: linear-gradient(135deg, #27ae60, #2ecc71); }
 .badge-medium     { background: linear-gradient(135deg, #f39c12, #f1c40f); }
