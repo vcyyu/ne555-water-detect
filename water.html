@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>水箱监测 · MQTT 版</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: system-ui, -apple-system, sans-serif;
+  background: #f0f2f5;
+  display: flex; align-items: center; justify-content: center;
+  min-height: 100vh; padding: 16px;
+}
+.card {
+  background: #fff; border-radius: 24px; padding: 24px;
+  width: 100%; max-width: 420px;
+  box-shadow: 0 10px 40px rgba(0,0,0,0.1);
+}
+h1 { font-size: 22px; text-align: center; color: #1a1a1a; margin-bottom: 4px; }
+.subtitle { text-align: center; color: #888; font-size: 13px; margin-bottom: 20px; }
+
+/* 设备在线/离线 */
+.device-status {
+  display: flex; align-items: center; justify-content: center;
+  gap: 8px; margin-bottom: 20px;
+  padding: 8px 16px; border-radius: 40px;
+  font-size: 14px; font-weight: 600;
+  width: fit-content; margin-left: auto; margin-right: auto;
+}
+.device-online  { background: #d4edda; color: #155724; }
+.device-offline { background: #f8d7da; color: #721c24; }
+.dot { width: 10px; height: 10px; border-radius: 50%; }
+.dot-on  { background: #27ae60; }
+.dot-off { background: #e74c3c; }
+
+/* 水箱图标 */
+.tank {
+  width: 140px; height: 200px;
+  border: 5px solid #2c3e50; border-radius: 12px;
+  margin: 0 auto 20px; position: relative; overflow: hidden;
+  background: #ecf0f1;
+}
+.water {
+  position: absolute; bottom: 0; left: 0; width: 100%;
+  transition: height 0.5s, background 0.5s;
+}
+.water.sufficient { height: 85%; background: linear-gradient(to top, #27ae60, #2ecc71); }
+.water.medium     { height: 50%; background: linear-gradient(to top, #f39c12, #f1c40f); }
+.water.low        { height: 20%; background: linear-gradient(to top, #e74c3c, #e67e22); }
+.percentage {
+  position: absolute; top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  color: #fff; font-size: 26px; font-weight: bold;
+  text-shadow: 1px 1px 4px rgba(0,0,0,0.4);
+}
+
+/* 水位状态徽章 */
+.badge {
+  display: block; padding: 10px; border-radius: 40px;
+  color: #fff; font-size: 22px; font-weight: bold;
+  margin: 0 0 16px; text-align: center;
+}
+.badge-sufficient { background: linear-gradient(135deg, #27ae60, #2ecc71); }
+.badge-medium     { background: linear-gradient(135deg, #f39c12, #f1c40f); }
+.badge-low        { background: linear-gradient(135deg, #e74c3c, #e67e22); }
+
+/* 系统时间 */
+.sys-time {
+  text-align: center; color: #555; font-size: 14px;
+  font-family: monospace; margin-bottom: 20px;
+}
+
+/* 控制行 */
+.control-row {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 12px 0; border-bottom: 1px solid #eee;
+}
+.control-row:last-child { border-bottom: none; }
+.control-label { color: #333; font-weight: 500; font-size: 15px; }
+
+/* 开关 */
+.switch { position: relative; display: inline-block; width: 48px; height: 26px; }
+.switch input { opacity: 0; width: 0; height: 0; }
+.slider {
+  position: absolute; cursor: pointer;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: #ccc; border-radius: 26px; transition: 0.3s;
+}
+.slider:before {
+  content: ""; position: absolute;
+  height: 20px; width: 20px; left: 3px; bottom: 3px;
+  background: #fff; border-radius: 50%; transition: 0.3s;
+}
+input:checked + .slider { background: #3498db; }
+input:checked + .slider:before { transform: translateX(22px); }
+
+/* 模式切换 */
+.mode-toggle {
+  display: flex; background: #eee; border-radius: 40px; overflow: hidden;
+  margin: 16px 0;
+}
+.mode-toggle button {
+  flex: 1; padding: 12px; border: none; font-size: 15px;
+  font-weight: 600; cursor: pointer; background: transparent;
+  color: #888; transition: 0.2s;
+}
+.mode-toggle button.active {
+  background: #3498db; color: #fff;
+}
+
+/* 水泵指示 */
+.pump-indicator {
+  display: flex; gap: 12px; margin: 16px 0;
+}
+.pump-box {
+  flex: 1; text-align: center; padding: 10px;
+  border-radius: 12px; font-size: 13px; color: #666;
+  transition: background 0.3s, border-color 0.3s;
+}
+/* 抽水泵：绿色背景框 */
+.pump-box-in  { background: #eafaf0; border: 1px solid #b7e4c7; }
+/* 排水泵：红色背景框 */
+.pump-box-out { background: #fdecec; border: 1px solid #f5b7b1; }
+/* 运行时高亮 */
+.pump-box-in-active  { background: #c8f0d8; border-color: #27ae60; }
+.pump-box-out-active { background: #f9d6d5; border-color: #e74c3c; }
+
+.pump-box .pump-name { font-weight: 600; color: #333; margin-bottom: 4px; }
+.pump-box .pump-val  { font-size: 16px; font-weight: bold; }
+.pump-on  { color: #27ae60; }
+.pump-off { color: #bbb; }
+
+/* 报警提示 */
+.alarm-bar {
+  text-align: center; padding: 10px; border-radius: 12px;
+  font-weight: bold; font-size: 14px; margin-top: 12px;
+  display: none;
+}
+.alarm-bar.show { display: block; background: #f8d7da; color: #721c24; }
+
+/* 连接状态 */
+.mqtt-status {
+  text-align: center; font-size: 12px; color: #aaa; margin-top: 16px;
+}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>💧 水箱监测</h1>
+  <div class="subtitle">MQTT 物联网版</div>
+
+  <!-- 设备在线/离线 -->
+  <div id="deviceStatus" class="device-status device-offline">
+    <span class="dot dot-off"></span>
+    <span id="deviceStatusText">设备离线</span>
+  </div>
+
+  <!-- 水箱图标 -->
+  <div class="tank">
+    <div id="water" class="water medium">
+      <div id="percentage" class="percentage">50%</div>
+    </div>
+  </div>
+  <div id="badge" class="badge badge-medium">中等</div>
+
+  <!-- 系统时间 -->
+  <div class="sys-time">
+    <span id="sysTime">--</span>
+  </div>
+
+  <!-- 报警提示 -->
+  <div id="alarmBar" class="alarm-bar">⚠️ 水位超限报警</div>
+
+  <!-- 水泵状态 -->
+  <div class="pump-indicator">
+    <div id="pumpInBox" class="pump-box pump-box-in">
+      <div class="pump-name">抽水泵</div>
+      <div id="pumpInVal" class="pump-val pump-off">停止</div>
+    </div>
+    <div id="pumpOutBox" class="pump-box pump-box-out">
+      <div class="pump-name">排水泵</div>
+      <div id="pumpOutVal" class="pump-val pump-off">停止</div>
+    </div>
+  </div>
+
+  <!-- 模式切换 -->
+  <div class="mode-toggle">
+    <button id="btnManual" class="active" onclick="setMode('manual')">手动模式</button>
+    <button id="btnAuto" onclick="setMode('auto')">自动模式</button>
+  </div>
+
+  <!-- 报警开关 -->
+  <div class="control-row">
+    <span class="control-label">🔔 LED 报警指示灯</span>
+    <label class="switch">
+      <input type="checkbox" id="ledSwitch" checked onchange="toggleLed(this.checked)">
+      <span class="slider"></span>
+    </label>
+  </div>
+  <div class="control-row">
+    <span class="control-label">🔊 蜂鸣器报警</span>
+    <label class="switch">
+      <input type="checkbox" id="buzzerSwitch" checked onchange="toggleBuzzer(this.checked)">
+      <span class="slider"></span>
+    </label>
+  </div>
+
+  <div class="mqtt-status" id="mqttStatus">MQTT 未连接</div>
+</div>
+
+<!-- MQTT.js CDN -->
+<script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+<script>
+// ==================== 配置 ====================
+const MQTT_HOST = "i11884f9.ala.cn-hangzhou.emqxsl.cn";
+const MQTT_WS_PORT = 8084;          // WebSocket TLS 端口
+const MQTT_USER = "esp-waterdetection";
+const MQTT_PASS = "water666888";
+
+const TOPIC_STATUS = "water/esp01_water01/status";
+const TOPIC_CMD    = "water/esp01_water01/cmd";
+const TOPIC_ONLINE = "water/esp01_water01/online";
+
+// ==================== MQTT 连接 ====================
+let client = null;
+let currentMode = "manual";  // 跟踪当前模式
+
+function connectMqtt() {
+  const url = `wss://${MQTT_HOST}:${MQTT_WS_PORT}/mqtt`;
+  client = mqtt.connect(url, {
+    username: MQTT_USER,
+    password: MQTT_PASS,
+    clientId: "web_" + Math.random().toString(16).slice(2, 10),
+    clean: true,
+    reconnectPeriod: 3000,
+    connectTimeout: 10000,
+  });
+
+  client.on("connect", () => {
+    document.getElementById("mqttStatus").textContent = "MQTT 已连接";
+    client.subscribe(TOPIC_STATUS, { qos: 0 });
+    client.subscribe(TOPIC_ONLINE, { qos: 0 });
+  });
+
+  client.on("message", (topic, payload) => {
+    const msg = payload.toString();
+    if (topic === TOPIC_ONLINE) {
+      updateDeviceOnline(msg === "online");
+    } else if (topic === TOPIC_STATUS) {
+      try {
+        const data = JSON.parse(msg);
+        updateUI(data);
+      } catch (e) { /* 忽略解析错误 */ }
+    }
+  });
+
+  client.on("close", () => {
+    document.getElementById("mqttStatus").textContent = "MQTT 断开，重连中...";
+  });
+
+  client.on("error", (err) => {
+    console.error("MQTT 错误:", err);
+  });
+}
+
+// ==================== UI 更新 ====================
+function updateDeviceOnline(online) {
+  const el = document.getElementById("deviceStatus");
+  const text = document.getElementById("deviceStatusText");
+  if (online) {
+    el.className = "device-status device-online";
+    el.querySelector(".dot").className = "dot dot-on";
+    text.textContent = "设备在线";
+  } else {
+    el.className = "device-status device-offline";
+    el.querySelector(".dot").className = "dot dot-off";
+    text.textContent = "设备离线";
+  }
+}
+
+function updateUI(data) {
+  // 水位
+  const level = data.level || "中等";
+  const water = document.getElementById("water");
+  const badge = document.getElementById("badge");
+  const per = document.getElementById("percentage");
+
+  water.className = "water";
+  badge.className = "badge";
+
+  if (level === "充足") {
+    water.classList.add("sufficient");
+    badge.classList.add("badge-sufficient");
+    per.textContent = "85%";
+  } else if (level === "中等") {
+    water.classList.add("medium");
+    badge.classList.add("badge-medium");
+    per.textContent = "50%";
+  } else {
+    water.classList.add("low");
+    badge.classList.add("badge-low");
+    per.textContent = "20%";
+  }
+  badge.textContent = level;
+
+  // 系统时间
+  document.getElementById("sysTime").textContent = data.datetime || "--";
+
+  // 报警条
+  const alarmBar = document.getElementById("alarmBar");
+  if (data.alarm === true) {
+    alarmBar.classList.add("show");
+  } else {
+    alarmBar.classList.remove("show");
+  }
+
+  // 水泵状态（含背景高亮）
+  const pumpInEl = document.getElementById("pumpInVal");
+  const pumpOutEl = document.getElementById("pumpOutVal");
+  const pumpInBox = document.getElementById("pumpInBox");
+  const pumpOutBox = document.getElementById("pumpOutBox");
+
+  if (data.pumpIn === "on") {
+    pumpInEl.textContent = "运行中";
+    pumpInEl.className = "pump-val pump-on";
+    pumpInBox.classList.add("pump-box-in-active");
+  } else {
+    pumpInEl.textContent = "停止";
+    pumpInEl.className = "pump-val pump-off";
+    pumpInBox.classList.remove("pump-box-in-active");
+  }
+  if (data.pumpOut === "on") {
+    pumpOutEl.textContent = "运行中";
+    pumpOutEl.className = "pump-val pump-on";
+    pumpOutBox.classList.add("pump-box-out-active");
+  } else {
+    pumpOutEl.textContent = "停止";
+    pumpOutEl.className = "pump-val pump-off";
+    pumpOutBox.classList.remove("pump-box-out-active");
+  }
+
+  // 同步模式按钮
+  if (data.mode === "auto" && currentMode !== "auto") {
+    setModeUI("auto");
+  } else if (data.mode === "manual" && currentMode !== "manual") {
+    setModeUI("manual");
+  }
+}
+
+function setModeUI(mode) {
+  currentMode = mode;
+  document.getElementById("btnManual").classList.toggle("active", mode === "manual");
+  document.getElementById("btnAuto").classList.toggle("active", mode === "auto");
+}
+
+// ==================== 控制指令 ====================
+function setMode(mode) {
+  if (!client || !client.connected) return;
+  const cmd = mode === "auto" ? "MODE_AUTO" : "MODE_MANUAL";
+  client.publish(TOPIC_CMD, cmd, { qos: 0 });
+  setModeUI(mode);
+}
+
+function toggleLed(on) {
+  if (!client || !client.connected) return;
+  client.publish(TOPIC_CMD, on ? "LED_ON" : "LED_OFF", { qos: 0 });
+}
+
+function toggleBuzzer(on) {
+  if (!client || !client.connected) return;
+  client.publish(TOPIC_CMD, on ? "BUZZER_ON" : "BUZZER_OFF", { qos: 0 });
+}
+
+// ==================== 启动 ====================
+window.onload = () => {
+  connectMqtt();
+  // 初始显示
+  updateUI({ level: "中等", mode: "manual", datetime: "--", alarm: false, pumpIn: "off", pumpOut: "off" });
+};
+</script>
+</body>
+</html>
